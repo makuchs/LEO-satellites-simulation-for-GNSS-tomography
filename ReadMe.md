@@ -33,8 +33,7 @@ This project provides tools to simulate satellite propagation using Two-Line Ele
       - `44351_COSMIC2-2_2022.sp3` – Example SP3 file
     - **TLE/**  
       - `46317_LEMUR2SQUAREJAWS.txt` – Example TLE file
-  - **output/**  
-    Folder for generated output (SPK kernels, CSV files)
+  - **output/**  - Folder for generated output (SPK kernels, CSV files)
   - **src/**
     - `__init__.py` 
     - `tle_simulation.py` – Module for TLE propagation, coordinate conversion, and SPICE kernel generation
