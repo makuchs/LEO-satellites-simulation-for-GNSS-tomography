@@ -23,24 +23,25 @@ This project provides tools to simulate satellite propagation using Two-Line Ele
 
 ## Project Structure
 
-repo/
-├── kernels/
-│   ├── naif0012.tls         # SPICE kernel file
-│   ├── pck00011.tpc         # SPICE kernel file
-│   └── de432s.bsp           # SPICE kernel file
-├── examples/
-│   ├── SP3/
-│   │   └── 44351_COSMIC2-2_2022.sp3   # Example SP3 file
-│   └── TLE/
-│       └── 46317_LEMUR2SQUAREJAWS.txt  # Example TLE file
-├── output/                 # Folder for generated output (SPK kernels, CSV files)
-├── src/
-│   ├── __init__.py         
-│   ├── tle_simulation.py   # Module for TLE propagation, coordinate conversion, and SPICE kernel generation
-│   ├── occultation.py      # Module for occultation analysis
-│   └── compare_positions.py# Module for comparing SP3 and simulated positions
-├── main.py                 # Main entry point – choose mode (simulation, occultation, compare)
-└── README.md               # Project documentation
+- **repo/**
+  - **kernels/**  
+    - `naif0012.tls` – SPICE kernel file  
+    - `pck00011.tpc` – SPICE kernel file  
+    - `de432s.bsp` – SPICE kernel file
+  - **examples/**
+    - **SP3/**  
+      - `44351_COSMIC2-2_2022.sp3` – Example SP3 file
+    - **TLE/**  
+      - `46317_LEMUR2SQUAREJAWS.txt` – Example TLE file
+  - **output/**  
+    Folder for generated output (SPK kernels, CSV files)
+  - **src/**
+    - `__init__.py` 
+    - `tle_simulation.py` – Module for TLE propagation, coordinate conversion, and SPICE kernel generation
+    - `occultation.py` – Module for occultation analysis
+    - `compare_positions.py` – Module for comparing SP3 and simulated positions
+  - `main.py` – Main entry point (choose mode: simulation, occultation, compare)
+  - `README.md` – Project documentation
 
 ## Dependencies
 
