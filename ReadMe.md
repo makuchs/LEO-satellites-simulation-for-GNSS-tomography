@@ -24,14 +24,14 @@ This project provides tools to simulate satellite propagation using Two-Line Ele
 ## Project Structure
 
 repo/
-├── kernels/                
+├── kernels/
 │   ├── naif0012.tls         # SPICE kernel file
 │   ├── pck00011.tpc         # SPICE kernel file
 │   └── de432s.bsp           # SPICE kernel file
 ├── examples/
-│   ├── SP3/                
+│   ├── SP3/
 │   │   └── 44351_COSMIC2-2_2022.sp3   # Example SP3 file
-│   └── TLE/                
+│   └── TLE/
 │       └── 46317_LEMUR2SQUAREJAWS.txt  # Example TLE file
 ├── output/                 # Folder for generated output (SPK kernels, CSV files)
 ├── src/
