@@ -1,145 +1,211 @@
 # Satellite Propagation and Analysis
 
-This project provides tools to simulate satellite propagation using Two-Line Element (TLE) data, generate SPICE kernel files, convert state vectors between coordinate systems (TEME, ECEF, J2000/GCRS), and perform occultation analysis. It also includes functionality to compare simulated positions with those derived from SP3 files.
+Tools to:
+- propagate satellites from **TLE** or **SP3**,
+- generate **SPICE SPK (.bsp)** kernels,
+- convert state vectors between **TEME / ECEF / J2000 (GCRS)**,
+- run **radio occultation (RO)** analysis,
+- run basic **GNSS-R** bistatic geometry simulation,
+- compare **SP3** positions with simulated **ECEF CSV** output.
 
-## Features
+---
 
-- **TLE Simulation**  
-  Propagate satellite states using the [sgp4](https://pypi.org/project/sgp4/) library.
+## Requirements
 
-- **Coordinate Conversion**  
-  Convert TEME state vectors to:
-  - **ECEF** coordinates using [Skyfield](https://rhodesmill.org/skyfield/)  
-  - **J2000** coordinates using [Astropy](https://www.astropy.org/)
-
-- **SPICE Kernel Generation**  
-  Generate SPK kernel files using [spiceypy](https://pypi.org/project/spiceypy/).
-
-- **Occultation Analysis**  
-  Analyze occultation events between satellites (module provided).
-
-- **Position Comparison**  
-  Compare simulated positions (from TLE propagation) with positions extracted from SP3 files.
+- Python 3.x
+- Packages: `numpy`, `sgp4`, `skyfield`, `astropy`, `spiceypy`, `requests`
 
 
-## Project Structure
+---
 
-- **repo/**
-  - **kernels/**  
-    - `naif0012.tls` – SPICE kernel file  
-    - `pck00011.tpc` – SPICE kernel file  
-    - `de432s.bsp` – SPICE kernel file
-    - **leo/** (kernels not included due to limited size of individual files)
-    - **gnss/** (kernels not included due to limited size of individual files)
-  - **examples/**
-    - **SP3/**  
-      - `44351_COSMIC2-2_2022.sp3` – Example SP3 file
-    - **TLE/**  
-      - `46317_LEMUR2SQUAREJAWS.txt` – Example TLE file
-  - **output/**  - Folder for generated output (SPK kernels, CSV files)
-  - **src/**
-    - `__init__.py` 
-    - `tle_simulation.py` – Module for TLE propagation, coordinate conversion, and SPICE kernel generation
-    - `occultation.py` – Module for occultation analysis
-    - `compare_positions.py` – Module for comparing SP3 and simulated positions
-  - `main.py` – Main entry point (choose mode: simulation, occultation, compare)
-  - `README.md` – Project documentation
+## Project structure
 
-## Dependencies
+```
+repo/
+  kernels/
+    naif0012.tls
+    pck00011.tpc
+    de432s.bsp
+    leo/        # generated LEO SPKs (.bsp) go here
+    gnss/       # generated GNSS SPKs (.bsp) go here
+  data/
+    leo.tle     # your input files (example names)
+    gnss.sp3
+  output/
+    *.csv       # results + optional simulated ECEF CSV
+  src/
+    tle_simulation.py
+    occultation.py
+    gnssr.py
+    compare_positions.py
+  misc/
+    sp3_tools.py # optional: download + SP3 post-processing helpers
+  main.py       # edit CONFIGURATION and run
+  README.md
+```
 
-The project requires Python 3.x and the following packages:
+Notes:
+- Base kernels under `kernels/` (LSK/PCK/planetary SPK) are required by the analysis modules.
+- Generated SPKs in `kernels/leo/` and `kernels/gnss/` are not tracked in git in most setups (they can be large).
 
-- numpy
-- sgp4
-- skyfield
-- astropy
-- spiceypy
+---
 
-## Main Function Overview
+## Running the project
 
-The project is designed to be run via `main.py`, which provides a simple interface to select and execute one of three modes: **simulation**, **occultation**, or **compare**. The configuration settings in `main.py` allow you to specify file paths, date ranges, and other parameters that control the execution.
+Edit the CONFIGURATION section in `main.py`, set `MODE`, then run:
 
-### Modes
+```bash
+python main.py
+```
 
-- **simulation:**  
-  - **Input:**  
-    - A TLE file (e.g., `examples/TLE/46317_LEMUR2SQUAREJAWS.txt`).
-  - **Process:**  
-    - Loads TLE records and propagates satellite states using the sgp4 library.
-    - Converts TEME state vectors to J2000 coordinates (for SPICE kernel generation) and to ECEF coordinates (for CSV output).
-    - Uses the TLE epochs and a defined timestep (e.g., 1 second) to determine simulation times.
-  - **Output:**  
-    - Generates an SPICE kernel file (with a `.bsp` extension) stored in the output folder.
-    - Creates a CSV file with ECEF positions for later comparison.
-  - **Satellite:**  
-    - Processes the satellite defined in the provided TLE file.
+Available modes:
 
-- **occultation:**  
-  - **Input:**  
-    - Folders containing SPICE kernels for LEO (e.g., `kernels/leo`) and GNSS (e.g., `kernels/gnss`) satellites.
-    - A date range (e.g., from `2022-01-03` to `2022-01-10`).
-  - **Process:**  
-    - Loads the required SPICE kernels.
-    - Iterates over each day within the specified date range.
-    - For each day, processes pairs of LEO and GNSS kernel files to detect radio occultation events.
-    - Occultation events are identified when the line-of-sight between the satellites falls within a defined field-of-view and over a designated area (e.g., Poland).
-  - **Output:**  
-    - Appends occultation event details (including event date, satellite positions, and tangent point coordinates) to a CSV file (e.g., `occultation_results.csv`).
-  - **Satellite:**  
-    - Works with the satellite data available in the provided kernel folders.
+- `simulation` — build an SPK kernel from a **TLE** or **SP3** file (optional ECEF CSV export)
+- `occultation` — run RO analysis (requires LEO + GNSS kernel folders)
+- `gnssr` — run GNSS-R geometry simulation (requires LEO + GNSS kernel folders)
+- `compare` — compare an SP3 file with an ECEF CSV produced by `simulation`
 
-- **compare:**  
-  - **Input:**  
-    - An SP3 file (e.g., `examples/SP3/46317_LEMUR2SQUAREJAWS_2022.sp3`) containing precise ephemeris data.
-    - The CSV file generated by the simulation mode.
-    - A satellite identifier (e.g., `PL99`) used to match data between the two files.
-  - **Process:**  
-    - Parses the SP3 file to extract satellite positions over time.
-    - Reads the CSV file for corresponding ECEF positions.
-    - Identifies common epochs (timestamps) between the two datasets.
-    - Computes the spatial differences between the SP3 and simulated positions.
-    - Generates a plot to visualize the position differences over time.
-  - **Output:**  
-    - Displays a plot showing the differences in satellite positions derived from the SP3 and simulation data.
-  - **Satellite:**  
-    - Compares data for the satellite identified by the provided satellite ID.
 
-### Execution Flow
+GNSS-R and occultation need two kernel folders:
+- **LEO kernels** (typically built from a TLE)
+- **GNSS kernels** (typically built from an SP3)
 
-Upon running `main.py`, the script checks the `MODE` configuration variable and calls the corresponding module function:
-- For **simulation**, it calls `tle_simulation.run_simulation(...)`.
-- For **occultation**, it calls `occultation.run_occultation(...)`.
-- For **compare**, it calls `compare_positions.run_compare(...)`.
+Do it in two runs of `MODE="simulation"`:
 
-## Downloading TLE Data
+1) **Build LEO kernel from TLE**
+- set `MODE = "simulation"`
+- set `SIM_INPUT_FILE = LEO_TLE_FILE`
+- set `SIM_SOURCE = "tle"`
+- set `SIM_OUTPUT_FOLDER = LEO_KERNEL_FOLDER`
+- run `python main.py`
 
-To obtain current TLE data, you can use the following services:
+2) **Build GNSS kernel from SP3**
+- keep `MODE = "simulation"`
+- set `SIM_INPUT_FILE = GNSS_SP3_FILE`
+- set `SIM_SOURCE = "sp3"`
+- set `SIM_OUTPUT_FOLDER = GNSS_KERNEL_FOLDER`
+- set SP3-only params: `SIM_SP3_SAT_ID` and `SIM_SP3_NAIF_ID`
+- run `python main.py`
 
-- **Space-Track:**  
-  This service requires registration. Once logged in, you can download TLE data manually or via their API. For more details, refer to the [Space-Track documentation](https://www.space-track.org/documentation).
+Then switch `MODE` to `gnssr` or `occultation` and run again.
 
-- **CelesTrak:**  
-  CelesTrak offers free and publicly accessible TLE data without requiring registration. You can find the latest TLE sets on the [CelesTrak website](https://celestrak.com).
+---
 
-These sources can be integrated into your project using HTTP requests or dedicated libraries for API interaction, which can help automate the data update process.
+## Mode details 
 
-### File Naming Convention
+### 1) `simulation`
 
-Ensure that the SPICE kernel files for LEO and GNSS satellites follow the naming convention: `NORAD_SATNAME.bsp`.  
-For example, if a satellite's NORAD identifier is `1234` and its name is `lemur2`, the kernel file should be named `1234_lemur2.bsp`.  
-This naming scheme is essential for proper identification and processing within the project.
+Input:
+- TLE: set `SIM_SOURCE="tle"` and point `SIM_INPUT_FILE` to a TLE file.
+- SP3: set `SIM_SOURCE="sp3"` and point `SIM_INPUT_FILE` to an SP3 file, plus:
+  - `SIM_SP3_SAT_ID` — satellite label as it appears in the SP3 (e.g. `PG18`)
+  - `SIM_SP3_NAIF_ID` — integer NAIF ID used inside the generated SPK (pick a unique value)
 
-## Funding and Acknowledgments
+Output:
+- SPK `.bsp` written to `SIM_OUTPUT_FOLDER`
+- optional ECEF CSV if `SIM_WRITE_CSV=True`
 
-This work was funded by the National Science Centre (NCN) Poland, by the Grant: UMO-2020/37/B/ST10/03703.
-We thank SPIRE company for delivering RO data.
+### 2) `gnssr`
+
+Requires:
+- `LEO_KERNEL_FOLDER` with one or more `.bsp` files
+- `GNSS_KERNEL_FOLDER` with one or more `.bsp` files
+
+Main outputs:
+- results CSV (e.g. `output/gnssr_results.csv`)
+
+Optional filters include date/time range, bbox, and basic geometry thresholds (see `main.py`).
+
+### 3) `occultation`
+
+Requires:
+- `LEO_KERNEL_FOLDER` and `GNSS_KERNEL_FOLDER`
+
+Output:
+- results CSV (e.g. `output/occultation_results.csv`)
+
+### 4) `compare`
+
+Input:
+- an SP3 file
+- an ECEF CSV produced by `simulation`
+- satellite ID used to match epochs (e.g. `PG18`)
+
+Output:
+- a plot of position differences over time
+
+---
+
+## Input data sources
+
+---
+
+## Misc utilities 
+
+The `misc/` folder contains helper scripts that are not required to run the main pipeline,
+but can speed up data preparation (downloading and cleaning SP3/LEO products).
+
+### `misc/sp3_tools.py`
+
+One script that combines:
+- downloading GNSS SP3 products from an IGS MGEX FTP mirror (and unzipping),
+- downloading LEO orbit tarballs from UCAR (and extracting),
+- combining many SP3 files into one time-sorted SP3 (optionally filtering satellites),
+- sorting large file dumps into subfolders.
+
+Examples:
+
+```bash
+# GNSS SP3 (IGS MGEX): download weeks covering a date range
+python misc/sp3_tools.py download-gnss --ac COD --start-date 2021-06-15 --end-date 2021-07-06 --out data/sp3/igs
+
+# LEO orbit products (UCAR): download daily tarballs and extract them
+python misc/sp3_tools.py download-leo --system spire --start-date 2023-09-30 --end-date 2023-10-03 --out data/sp3/spire
+
+# Combine many SP3 files into one file (keep only one record ID, e.g. PG18)
+python misc/sp3_tools.py combine --in data/sp3/igs --out data/PG18.sp3 --sat PG18
+
+# Sort files into subfolders based on a filename segment (dot-split)
+python misc/sp3_tools.py sort-subfolders --in data/sp3/spire --segment-index 2
+```
+
+Notes:
+- `--sat` expects a SP3 record ID (e.g. `PG18`). If you want velocities too, add `VG18` as well.
+
+
+### TLE
+You can obtain current TLE data from:
+- Space-Track 
+- CelesTrak 
+
+### SP3
+Use precise ephemeris SP3 files from your GNSS data source.
+
+---
+
+## Kernel naming convention
+
+If you generate multiple kernels, it is recommended to keep a consistent filename pattern such as:
+
+```
+NORAD_SATNAME.bsp
+```
+
+Example: NORAD `1234` and name `lemur2` → `1234_lemur2.bsp`
+
+---
+
+## Funding and acknowledgments
+
+This work was funded by the National Science Centre (NCN) Poland, Grant: **UMO-2020/37/B/ST10/03703**.  
+We thank **SPIRE** for delivering RO data.
+
+---
 
 ## Acknowledgments
 
 This project makes use of:
-
-The sgp4 library for TLE propagation.
-The Skyfield library for coordinate transformations.
-Astropy for time and coordinate management.
-spiceypy for SPICE kernel operations.
-Contributions and suggestions are welcome!
+- `sgp4` for TLE propagation
+- Skyfield for coordinate transformations
+- Astropy for time/coordinate utilities
+- spiceypy for SPICE kernel operations
