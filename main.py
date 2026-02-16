@@ -20,6 +20,9 @@ Available modes (set MODE below)
 - "compare"
     Compare positions from an SP3 file with positions exported to CSV by "simulation".
 
+- "constellation"
+    Creates a satellite constellation from the given TLE and SP3 files and then calculates the DOP coefficients for it.
+
 How to build kernels for GNSS-R / RO
 ------------------------------------
 GNSS-R and occultation need two kernel folders:
@@ -40,7 +43,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 
 # =================== CONFIGURATION ===================
 
-# Select one: "simulation", "occultation", "gnssr", "compare"
+# Select one: "simulation", "occultation", "gnssr", "compare", "constellation"
 MODE = "gnssr"
 
 # Repository-relative folders (recommended for GitHub projects)
@@ -96,6 +99,15 @@ OCC_END_DATE = "2022-01-10"
 CMP_SP3_FILE = GNSS_SP3_FILE
 CMP_SIM_ECEF_CSV = os.path.join(OUTPUT_DIR, "simulation_ecef.csv")
 CMP_SAT_ID = GNSS_SP3_SAT_ID
+
+#----------- Constellation (MODE="constellation) -----------
+OBSERVER = "examples/constellation_simulation/OBSERVER_POINTS/OBSERVER.txt"     # File with the observer's position and horizon obscuration in the format:
+                                                                                # Name,Latitude,Longitude,Altitude,Elevation (elevation angles list in degrees, every 45 degrees azimuth)
+SIM_START_DATE = "2025-03-31 12:00:00"                                          # YYYY-MM-DD hh:mm:ss
+SIM_INTERVAL = 30                                                               # Interval between epochs, in seconds
+NUM_OF_EPOCHS = 120                                                             # Number of epochs
+DOP_OUTPUT = f"examples/constellation_simulation/output/DOP {SIM_START_DATE.replace(':', '-')} {SIM_INTERVAL} INT {NUM_OF_EPOCHS} EPO"
+MISC_OUTPUT = f"examples/constellation_simulation/output/MISC {SIM_START_DATE.replace(':', '-')} {SIM_INTERVAL} INT {NUM_OF_EPOCHS} EPO"
 
 # =====================================================
 
@@ -171,9 +183,22 @@ def main() -> None:
             sat_id=CMP_SAT_ID,
         )
 
+    elif MODE == "constellation":
+        import constellation_simulation
+        
+        print("Running: constellation")
+        constellation_simulation.run_constellation_simulation(
+            observer_position=OBSERVER,
+            simulation_start_date=SIM_START_DATE,
+            interval_between_epochs=SIM_INTERVAL,
+            number_of_epochs=NUM_OF_EPOCHS,
+            dop_results_output=DOP_OUTPUT,
+            other_results_output=MISC_OUTPUT)
+
     else:
         raise ValueError("Invalid MODE. Use: 'simulation', 'occultation', 'gnssr', or 'compare'.")
 
 
 if __name__ == "__main__":
     main()
+

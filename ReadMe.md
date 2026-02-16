@@ -6,7 +6,8 @@ Tools to:
 - convert state vectors between **TEME / ECEF / J2000 (GCRS)**,
 - run **radio occultation (RO)** analysis,
 - run basic **GNSS-R** bistatic geometry simulation,
-- compare **SP3** positions with simulated **ECEF CSV** output.
+- compare **SP3** positions with simulated **ECEF CSV** output,
+- simulate a satellite constellation and calculate DOP coefficients for it.
 
 ---
 
@@ -64,6 +65,7 @@ Available modes:
 - `occultation` — run RO analysis (requires LEO + GNSS kernel folders)
 - `gnssr` — run GNSS-R geometry simulation (requires LEO + GNSS kernel folders)
 - `compare` — compare an SP3 file with an ECEF CSV produced by `simulation`
+- `constellation` — simulating a satellite constellation based on **SP3** and **TLE** files and calculating DOP for it
 
 
 GNSS-R and occultation need two kernel folders:
@@ -133,6 +135,17 @@ Input:
 
 Output:
 - a plot of position differences over time
+
+### 5) `constellation`
+
+Input:
+- SP3 files
+- TLE files
+- file with observer positions and elevation angles
+
+Output:
+- file with calculated DOP coefficients for each observer position at each epoch
+- files with results for the entire calculation process (transformations between coordinate systems)
 
 ---
 
