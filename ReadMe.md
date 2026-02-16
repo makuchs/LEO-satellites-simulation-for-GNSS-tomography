@@ -6,8 +6,7 @@ Tools to:
 - convert state vectors between **TEME / ECEF / J2000 (GCRS)**,
 - run **radio occultation (RO)** analysis,
 - run basic **GNSS-R** bistatic geometry simulation,
-- compare **SP3** positions with simulated **ECEF CSV** output,
-- simulate a satellite constellation and calculate DOP coefficients for it.
+- compare **SP3** positions with simulated **ECEF CSV** output.
 
 ---
 
@@ -65,7 +64,7 @@ Available modes:
 - `occultation` — run RO analysis (requires LEO + GNSS kernel folders)
 - `gnssr` — run GNSS-R geometry simulation (requires LEO + GNSS kernel folders)
 - `compare` — compare an SP3 file with an ECEF CSV produced by `simulation`
-- `constellation` — simulating a satellite constellation based on **SP3** and **TLE** files and calculating DOP for it
+- `constellation` — build a satellite constellation from TLE/SP3 inputs and compute DOP coefficients (PDOP, GDOP, HDOP, VDOP, TDOP) for a given observer / horizon mask.
 
 
 GNSS-R and occultation need two kernel folders:
@@ -139,13 +138,14 @@ Output:
 ### 5) `constellation`
 
 Input:
-- SP3 files
-- TLE files
-- file with observer positions and elevation angles
+- observer file in the format:
+  `Name,Latitude,Longitude,Altitude,Elevation`
+  where `Elevation` is a list of elevation angles (degrees) sampled every 45° azimuth.
+- satellite sources from SP3 and/or TLE (see `examples/constellation_simulation/`)
 
 Output:
-- file with calculated DOP coefficients for each observer position at each epoch
-- files with results for the entire calculation process (transformations between coordinate systems)
+- DOP time series (PDOP, GDOP, HDOP, VDOP, TDOP)
+- additional per-epoch constellation diagnostics (see output paths in `main.py`)
 
 ---
 
@@ -205,6 +205,16 @@ NORAD_SATNAME.bsp
 ```
 
 Example: NORAD `1234` and name `lemur2` → `1234_lemur2.bsp`
+
+---
+
+## Contributors
+
+- Thanks to **@marcinwapinski** for adding a satellite constellation simulation and DOP calculation module, including:
+  - building constellations from **SP3** and **TLE** inputs,
+  - interpolation of satellite positions for missing epochs,
+  - coordinate transformations between supported reference frames,
+  - DOP metrics: **PDOP, GDOP, HDOP, VDOP, TDOP**.
 
 ---
 
