@@ -44,7 +44,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 # =================== CONFIGURATION ===================
 
 # Select one: "simulation", "occultation", "gnssr", "compare", "constellation"
-MODE = "gnssr"
+MODE = "simulation"
 
 # Repository-relative folders (recommended for GitHub projects)
 OUTPUT_DIR = "output"
@@ -58,11 +58,13 @@ GNSS_SP3_SAT_ID = "PG18"                                # as it appears in SP3 (
 
 # ---------- Simulation (MODE="simulation") ----------
 # Pick which file to process (TLE or SP3) and where to write the kernel.
-SIM_INPUT_FILE = LEO_TLE_FILE                           # change to GNSS_SP3_FILE for SP3 mode
-SIM_SOURCE = "tle"                                      # "tle" or "sp3" (or "auto")
+# SIM_INPUT_FILE can be a single file or a folder for batch processing.
+SIM_SOURCE = "tle"                                      # "tle", "sp3", or "auto"
+SIM_INPUT_FILE = LEO_TLE_FILE
 SIM_OUTPUT_FOLDER = LEO_KERNEL_FOLDER                   # change to GNSS_KERNEL_FOLDER for GNSS
 SIM_WRITE_CSV = False                                   # export ECEF CSV (optional)
 SIM_CSV_OUTPUT = None                                   # optional path; None = auto name
+SIM_TLE_STEP_SECONDS = 60
 
 # SP3-only parameters (required when SIM_SOURCE="sp3")
 SIM_SP3_SAT_ID = GNSS_SP3_SAT_ID
@@ -89,6 +91,9 @@ GNSSR_INC_MAX_DEG = None
 GNSSR_BISTATIC_MAX_DEG = None
 GNSSR_EXCESS_MAX_KM = None
 GNSSR_LOS_TOL_KM = 0.01
+GNSSR_BATCH_PER_LEO = False
+GNSSR_BATCH_OUTPUT_FOLDER = os.path.join(OUTPUT_DIR, "gnssr_per_leo")
+GNSSR_MAX_WORKERS = 4
 
 # ---------- Occultation (MODE="occultation") ----------
 OCC_CSV_FILE = os.path.join(OUTPUT_DIR, "occultation_results.csv")
@@ -116,7 +121,42 @@ def _ensure_dirs() -> None:
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     os.makedirs(LEO_KERNEL_FOLDER, exist_ok=True)
     os.makedirs(GNSS_KERNEL_FOLDER, exist_ok=True)
+    if GNSSR_BATCH_PER_LEO:
+        os.makedirs(GNSSR_BATCH_OUTPUT_FOLDER, exist_ok=True)
 
+def _iter_simulation_inputs(path_value: str, source: str):
+    if not os.path.isdir(path_value):
+        return [path_value]
+
+    source_norm = (source or "auto").lower().strip()
+    if source_norm not in {"tle", "sp3", "auto"}:
+        raise ValueError("SIM_SOURCE must be one of: 'tle', 'sp3', 'auto'.")
+    allowed_suffixes = {
+        "tle": (".tle", ".txt"),
+        "sp3": (".sp3",),
+        "auto": (".tle", ".txt", ".sp3"),
+    }
+    files = [
+        os.path.join(path_value, name)
+        for name in sorted(os.listdir(path_value))
+        if os.path.isfile(os.path.join(path_value, name))
+        and name.lower().endswith(allowed_suffixes[source_norm])
+    ]
+    if not files:
+        raise FileNotFoundError(
+            f"No matching input files found in folder: {path_value} "
+            f"(source={source_norm})"
+        )
+
+    if source_norm == "auto":
+        suffixes = {os.path.splitext(file_path)[1].lower() for file_path in files}
+        if ".sp3" in suffixes and any(suffix in suffixes for suffix in (".tle", ".txt")):
+            raise ValueError(
+                "SIM_SOURCE='auto' does not support mixed TLE/SP3 folders. "
+                "Set SIM_SOURCE explicitly for batch processing."
+            )
+
+    return files
 
 def main() -> None:
     _ensure_dirs()
@@ -125,17 +165,39 @@ def main() -> None:
         import tle_simulation
 
         print("Running: simulation")
-        tle_simulation.run_simulation(
-            SIM_INPUT_FILE,
-            csv_output=SIM_CSV_OUTPUT,
-            output_folder=SIM_OUTPUT_FOLDER,
-            source=SIM_SOURCE,
-            sp3_sat_id=SIM_SP3_SAT_ID,
-            sp3_naif_id=SIM_SP3_NAIF_ID,
-            sp3_step_seconds=SIM_SP3_STEP_SECONDS,
-            sp3_unit_is_km=SIM_SP3_UNIT_IS_KM,
-            write_csv=SIM_WRITE_CSV,
-        )
+
+        sim_inputs = _iter_simulation_inputs(SIM_INPUT_FILE, SIM_SOURCE)
+        if len(sim_inputs) > 1 and SIM_WRITE_CSV and SIM_CSV_OUTPUT is not None:
+            raise ValueError(
+                "Batch simulation with a custom SIM_CSV_OUTPUT would overwrite the same file. "
+                "Set SIM_CSV_OUTPUT = None or process a single input."
+            )
+        ok = 0
+        fail = 0
+
+        for i, sim_input in enumerate(sim_inputs, start=1):
+            print(f"[{i}/{len(sim_inputs)}] {sim_input}")
+            try:
+                tle_simulation.run_simulation(
+                    input_file=sim_input,
+                    csv_output=SIM_CSV_OUTPUT,
+                    output_folder=SIM_OUTPUT_FOLDER,
+                    source=SIM_SOURCE,
+                    sp3_sat_id=SIM_SP3_SAT_ID,
+                    sp3_naif_id=SIM_SP3_NAIF_ID,
+                    sp3_step_seconds=SIM_SP3_STEP_SECONDS,
+                    sp3_unit_is_km=SIM_SP3_UNIT_IS_KM,
+                    write_csv=SIM_WRITE_CSV,
+                    tle_step_seconds=SIM_TLE_STEP_SECONDS,
+                )
+                ok += 1
+            except Exception as exc:
+                fail += 1
+                print(f"  FAIL: {exc}")
+
+        print(f"Simulation summary: OK={ok}, FAIL={fail}")
+        if fail:
+            raise RuntimeError(f"Failed to generate {fail} output(s)")
 
     elif MODE == "occultation":
         import occultation
@@ -153,25 +215,47 @@ def main() -> None:
         import gnssr
 
         print("Running: gnssr")
-        gnssr.run_gnssr(
-            leo_folder=LEO_KERNEL_FOLDER,
-            gnss_folder=GNSS_KERNEL_FOLDER,
-            csv_file_path=GNSSR_CSV_FILE,
-            start_date=GNSSR_START_DATE,
-            end_date=GNSSR_END_DATE,
-            start_time_utc=GNSSR_START_TIME_UTC,
-            end_time_utc=GNSSR_END_TIME_UTC,
-            bbox=GNSSR_BBOX,
-            step_seconds=GNSSR_STEP_SECONDS,
-            specular_err_max=GNSSR_SPECULAR_ERR_MAX,
-            inc_max_deg=GNSSR_INC_MAX_DEG,
-            bistatic_max_deg=GNSSR_BISTATIC_MAX_DEG,
-            excess_max_km=GNSSR_EXCESS_MAX_KM,
-            los_tol_km=GNSSR_LOS_TOL_KM,
-            bbox_guided_search=GNSSR_BBOX_GUIDED_SEARCH,
-            bbox_grid_deg=GNSSR_BBOX_GRID_DEG,
-            initial_latlon=GNSSR_INITIAL_LATLON,
-        )
+        if GNSSR_BATCH_PER_LEO:
+            gnssr.run_gnssr_subprocess_per_leo(
+                leo_folder=LEO_KERNEL_FOLDER,
+                gnss_folder=GNSS_KERNEL_FOLDER,
+                output_folder=GNSSR_BATCH_OUTPUT_FOLDER,
+                start_date=GNSSR_START_DATE,
+                end_date=GNSSR_END_DATE,
+                start_time_utc=GNSSR_START_TIME_UTC,
+                end_time_utc=GNSSR_END_TIME_UTC,
+                bbox=GNSSR_BBOX,
+                step_seconds=GNSSR_STEP_SECONDS,
+                specular_err_max=GNSSR_SPECULAR_ERR_MAX,
+                inc_max_deg=GNSSR_INC_MAX_DEG,
+                bistatic_max_deg=GNSSR_BISTATIC_MAX_DEG,
+                excess_max_km=GNSSR_EXCESS_MAX_KM,
+                los_tol_km=GNSSR_LOS_TOL_KM,
+                bbox_guided_search=GNSSR_BBOX_GUIDED_SEARCH,
+                bbox_grid_deg=GNSSR_BBOX_GRID_DEG,
+                initial_latlon=GNSSR_INITIAL_LATLON,
+                max_workers=GNSSR_MAX_WORKERS,
+            )
+        else:
+            gnssr.run_gnssr(
+                leo_folder=LEO_KERNEL_FOLDER,
+                gnss_folder=GNSS_KERNEL_FOLDER,
+                csv_file_path=GNSSR_CSV_FILE,
+                start_date=GNSSR_START_DATE,
+                end_date=GNSSR_END_DATE,
+                start_time_utc=GNSSR_START_TIME_UTC,
+                end_time_utc=GNSSR_END_TIME_UTC,
+                bbox=GNSSR_BBOX,
+                step_seconds=GNSSR_STEP_SECONDS,
+                specular_err_max=GNSSR_SPECULAR_ERR_MAX,
+                inc_max_deg=GNSSR_INC_MAX_DEG,
+                bistatic_max_deg=GNSSR_BISTATIC_MAX_DEG,
+                excess_max_km=GNSSR_EXCESS_MAX_KM,
+                los_tol_km=GNSSR_LOS_TOL_KM,
+                bbox_guided_search=GNSSR_BBOX_GUIDED_SEARCH,
+                bbox_grid_deg=GNSSR_BBOX_GRID_DEG,
+                initial_latlon=GNSSR_INITIAL_LATLON,
+            )
 
     elif MODE == "compare":
         import compare_positions
@@ -185,7 +269,7 @@ def main() -> None:
 
     elif MODE == "constellation":
         import constellation_simulation
-        
+
         print("Running: constellation")
         constellation_simulation.run_constellation_simulation(
             observer_position=OBSERVER,
@@ -193,11 +277,13 @@ def main() -> None:
             interval_between_epochs=SIM_INTERVAL,
             number_of_epochs=NUM_OF_EPOCHS,
             dop_results_output=DOP_OUTPUT,
-            other_results_output=MISC_OUTPUT)
+            other_results_output=MISC_OUTPUT,
+        )
 
     else:
-        raise ValueError("Invalid MODE. Use: 'simulation', 'occultation', 'gnssr', or 'compare'.")
-
+        raise ValueError(
+            "Invalid MODE. Use: 'simulation', 'occultation', 'gnssr', 'compare', or 'constellation'."
+        )
 
 if __name__ == "__main__":
     main()

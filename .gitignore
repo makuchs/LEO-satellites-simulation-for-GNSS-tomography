@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+
+output/
+kernels/leo/
+kernels/gnss/
+examples/constellation_simulation/output/

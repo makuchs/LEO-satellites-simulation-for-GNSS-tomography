@@ -224,10 +224,4 @@ def run_occultation(leo_folder, gnss_folder, csv_file_path, start_date, end_date
                     print(f"Error processing {gnss_path} on {date.strftime('%Y-%m-%d')}: {e}")
                     
 if __name__ == '__main__':
-    run_occultation(
-        leo_folder=r"your_default_leo_folder_here",
-        gnss_folder=r"your_default_gnss_folder_here",
-        csv_file_path=r"your_default_output.csv",
-        start_date="2022-01-03",
-        end_date="2022-01-06"
-    )
+    raise SystemExit("Use main.py with MODE='occultation', or import run_occultation() from Python.")

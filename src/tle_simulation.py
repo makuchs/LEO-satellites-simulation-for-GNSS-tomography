@@ -29,33 +29,49 @@ import skyfield.sgp4lib as sgp4lib
 from astropy import coordinates as coord, units as u
 from astropy.time import Time
 import spiceypy as spice  
+from project_paths import DE432_FILE, EARTH_BPC_FILE, LSK_FILE, PCK_TPC_FILE
 
 def load_spice_kernels():
     """
     Loads the required SPICE kernels from the repository's kernels folder.
     """
-    BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-    KERNELS_DIR = os.path.join(BASE_DIR, "kernels")
-
     spice.kclear()
-    spice.furnsh(os.path.join(KERNELS_DIR, "lsk", "naif0012.tls"))
-    spice.furnsh(os.path.join(KERNELS_DIR, "pck", "pck00011.tpc"))
-    spice.furnsh(os.path.join(KERNELS_DIR, "spk", "de432s.bsp"))
-    spice.furnsh(os.path.join(KERNELS_DIR, "pck", "earth_000101_241106_240813.bpc"))
+    spice.furnsh(str(LSK_FILE))
+    spice.furnsh(str(PCK_TPC_FILE))
+    spice.furnsh(str(DE432_FILE))
+    if EARTH_BPC_FILE.exists():
+        spice.furnsh(str(EARTH_BPC_FILE))
 
 def load_tle_records(filename):
-    """
-    Reads a TLE text file and returns a list of TLE records.
-    Each record is a tuple: (name, line1, line2).
-    Assumes the file is organized in groups of three nonempty lines.
-    """
     tle_records = []
     with open(filename, 'r') as f:
         lines = [line.strip() for line in f if line.strip()]
+
+    if not lines:
+        raise ValueError("TLE file is empty.")
+
+    if all((ln.startswith("1 ") or ln.startswith("2 ")) for ln in lines):
+        if len(lines) % 2 != 0:
+            raise ValueError("TLE file format error: 2-line TLE file has odd number of nonempty lines.")
+        base_name = os.path.splitext(os.path.basename(filename))[0]
+        rec_idx = 1
+        for i in range(0, len(lines), 2):
+            l1, l2 = lines[i], lines[i + 1]
+            if not l1.startswith("1 ") or not l2.startswith("2 "):
+                raise ValueError(f"TLE file format error near lines {i+1}-{i+2}.")
+            tle_records.append((f"{base_name}_{rec_idx:05d}", l1, l2))
+            rec_idx += 1
+        return tle_records
+
     if len(lines) % 3 != 0:
         raise ValueError("TLE file format error: total nonempty lines not a multiple of 3.")
+
     for i in range(0, len(lines), 3):
-        tle_records.append((lines[i], lines[i+1], lines[i+2]))
+        name, l1, l2 = lines[i], lines[i + 1], lines[i + 2]
+        if not l1.startswith("1 ") or not l2.startswith("2 "):
+            raise ValueError(f"TLE file format error near lines {i+1}-{i+3}.")
+        tle_records.append((name, l1, l2))
+
     return tle_records
 
 def propagate_to_next_whole_second(satellite, jd=None, fr=None):
@@ -221,11 +237,7 @@ def batch_teme_to_j2000(jd_list, p_teme_list, v_teme_list):
 
     return p_j2000, v_j2000
 
-def write_j2000_spice_kernel(kernel_filename, times, positions, velocities, tle_filename):
-    """
-    Converts TEME simulation states to J2000 using batch processing and writes an SPK kernel using spiceypy.
-    The satellite NORAD ID is extracted from the TLE filename.
-    """
+def write_j2000_spice_kernel(kernel_filename, times, positions, velocities, tle_filename, step_seconds=30):
     load_spice_kernels()
 
     base = os.path.basename(tle_filename)
@@ -254,12 +266,24 @@ def write_j2000_spice_kernel(kernel_filename, times, positions, velocities, tle_
     segid = f"SPK_SEGMENT_{sat_norad}"
     handle = spice.spkopn(kernel_filename, f"SPK Kernel for satellite {sat_norad}", 0)
 
-    spice.spkw08(handle, int(sat_norad), 399, "J2000", et_times[0], et_times[-1],
-                 segid, 7, len(et_times), states_matrix, et_times[0], 30)
+    spice.spkw08(
+        handle,
+        int(sat_norad),
+        399,
+        "J2000",
+        et_times[0],
+        et_times[-1],
+        segid,
+        7,
+        len(et_times),
+        states_matrix,
+        et_times[0],
+        float(step_seconds),
+    )
 
     spice.spkcls(handle)
     print(f"SPK kernel '{kernel_filename}' created successfully for satellite {sat_norad}.")
-
+    
 def remove_duplicate_epochs(times, positions, velocities, tol=1e-9):
     """
     Removes duplicate epochs from the lists 'times', 'positions', and 'velocities'.
@@ -433,29 +457,7 @@ def write_sp3_spice_kernel(sp3_file, sat_id, naif_id, kernel_filename,
 def run_simulation(input_file, csv_output=None, output_folder="output",
                    source="auto", sp3_sat_id=None, sp3_naif_id=None,
                    sp3_step_seconds=1, sp3_unit_is_km=True,
-                   write_csv=False):
-    """
-    Run either a TLE-based simulation or an SP3-based kernel build, depending on the input or 'source'.
-
-    Parameters
-    ----------
-    input_file : str
-        Path to a TLE file (.txt) or an SP3 file (.sp3).
-    csv_output : str or None
-        Optional output CSV path. If None, a default name is created in output_folder.
-    output_folder : str
-        Folder where outputs (SPK/CSV) will be written.
-    source : {'auto','tle','sp3'}
-        Select processing mode. 'auto' infers from file extension.
-    sp3_sat_id : str or None
-        Satellite identifier as it appears in the SP3 (e.g., 'PG01', 'PL99'). Required for SP3 mode.
-    sp3_naif_id : int or None
-        Integer NAIF ID to assign in the SPK for this satellite. Required for SP3 mode.
-    sp3_step_seconds : int
-        Resampling step for SP3 positions before kernel generation.
-    sp3_unit_is_km : bool
-        Whether SP3 XYZ units are kilometers (True) or meters (False).
-    """
+                   write_csv=False, tle_step_seconds=60):
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
 
@@ -474,23 +476,35 @@ def run_simulation(input_file, csv_output=None, output_folder="output",
     kernel_filename = os.path.join(output_folder, base_name + ".bsp")
     if write_csv and (not csv_output):
         csv_output = os.path.join(output_folder, base_name + "_ecef.csv")
+    if write_csv and csv_output:
+        os.makedirs(os.path.dirname(csv_output) or ".", exist_ok=True)
 
     if mode == "tle":
         print("Loading TLE records...")
         tle_list = load_tle_records(input_file)
 
         print("Starting simulation of satellite states (TEME)...")
-        times, positions, velocities = simulate_tle_states(tle_list, timestep_seconds=1)
+        times, positions, velocities = simulate_tle_states(
+            tle_list,
+            timestep_seconds=int(tle_step_seconds)
+        )
         times, positions, velocities = remove_duplicate_epochs(times, positions, velocities)
 
         print("Writing J2000 SPICE kernel...(be patient!)")
-        write_j2000_spice_kernel(kernel_filename, times, positions, velocities, input_file)
+        write_j2000_spice_kernel(
+            kernel_filename,
+            times,
+            positions,
+            velocities,
+            input_file,
+            step_seconds=int(tle_step_seconds),
+        )
 
         if write_csv:
             print("Writing ECEF positions to CSV for comparison...")
             write_positions_csv_ecef(csv_output, times, positions, velocities)
         print("Done.")
-        return
+        return kernel_filename
 
     if mode == "sp3":
         if sp3_sat_id is None or sp3_naif_id is None:
@@ -515,16 +529,8 @@ def run_simulation(input_file, csv_output=None, output_folder="output",
         else:
             print("Skipping CSV generation.")
         print("Done.")
-        return
+        return kernel_filename
 
 
 if __name__ == '__main__':
-    run_simulation(
-        r"C:\Users\User\Downloads\GRG0OPSULT_20260341800_02D_05M_ORB.SP3\GRG0OPSULT_20260341800_02D_05M_ORB.SP3",
-        source="sp3",
-        sp3_sat_id="PC19",
-        sp3_naif_id=7000019,
-        sp3_step_seconds=300,
-        sp3_unit_is_km=True,
-        output_folder="output"
-    )
+    raise SystemExit("Use main.py to run simulations, or import run_simulation() from Python.")

@@ -105,5 +105,4 @@ def run_compare(sp3_file, csv_file, sat_id="PL99"):
     plt.show()
 
 if __name__ == '__main__':
-    # For direct testing of compare_positions, if needed.
-    run_compare(r"C:\path\to\sp3_file.sp3", r"C:\path\to\simulation_output.csv", "PL77")
+    raise SystemExit("Use main.py with MODE='compare', or import run_compare() from Python.")
