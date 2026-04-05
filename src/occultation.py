@@ -58,28 +58,27 @@ def get_name_and_id_from_path(path):
     name = parts[1] if len(parts) > 1 else "Unknown"
     return name, sat_id
 
-def is_point_in_poland(fshape, target, start, fframe, abcorr, locus, observer, rayfrm, dvec):
+def is_point_in_bounding_box(fshape, target, start, fframe, abcorr, locus, observer, rayfrm, dvec, bbox):
     """
-    Determines if a computed tangent point is within Poland.
-    
-    Returns a tuple: (is_in_poland, longitude, latitude)
+    Determines if the tangent point lies inside a geographic bounding box.
+
+    bbox: (min_lat, max_lat, min_lon, max_lon) in degrees.
+
+    Returns (in_bbox, lon_deg, lat_deg), or (False, None, None) on failure.
     """
+    min_lat, max_lat, min_lon, max_lon = bbox
     try:
         tangent_point, _, _, _, _, _ = spice.tangpt(fshape, target, start, fframe, abcorr, locus, observer, rayfrm, dvec)
         _, lon, lat = spice.reclat(tangent_point)
         lon_deg = spice.convrt(lon, 'RADIANS', 'DEGREES')
         lat_deg = spice.convrt(lat, 'RADIANS', 'DEGREES')
-        
-        poland_lat_bounds = (-8, 4)   # 8°S to 4°N
-        poland_lon_bounds = (46, 58)  # 46°E to 58°E
 
-        is_in_poland = (poland_lat_bounds[0] <= lat_deg <= poland_lat_bounds[1]) and \
-                       (poland_lon_bounds[0] <= lon_deg <= poland_lon_bounds[1])
+        in_bbox = (min_lat <= lat_deg <= max_lat) and (min_lon <= lon_deg <= max_lon)
 
-        return is_in_poland, lon_deg, lat_deg
+        return in_bbox, lon_deg, lat_deg
     except Exception as e:
         print(f"Error: {e}")
-        return False
+        return False, None, None
 
 def convert_to_lat_long(start, pos_leo, pos_gnss):
     """
@@ -118,10 +117,10 @@ def is_within_fov(vel_vector, los_vector, fov_angle_deg=55):
     return in_fov_ram or in_fov_wake
 
 def process_occultation(leo_id, gnss_id, timestamp, gnss_name, leo_name,
-                        results_list, fshape, target, fframe, abcorr, locus, observer, rayfrm):
+                        results_list, fshape, target, fframe, abcorr, locus, observer, rayfrm, bbox):
     """
     Processes a single occultation event, extracting position information
-    and checking if the event is within the field-of-view and over Poland.
+    and checking if the event is within the field-of-view and inside the bounding box.
     """
     start_utc = spice.timout(timestamp, "YYYY-MM-DD HR:MN:SC ::UTC")
     pos_leo, _ = spice.spkpos(leo_id, timestamp, 'J2000', 'NONE', 'EARTH')
@@ -144,9 +143,11 @@ def process_occultation(leo_id, gnss_id, timestamp, gnss_name, leo_name,
     pos_gnss_fov = state_gnss[:3]
     los_vector = spice.vsub(pos_gnss_fov, pos_leo_fov)
     in_fov = is_within_fov(vel_leo_fov, los_vector)
-    is_in = is_point_in_poland(fshape, target, timestamp, fframe, abcorr, locus, observer, rayfrm, dvec)
-    
-    if in_fov and is_in:
+    in_bbox, _, _ = is_point_in_bounding_box(
+        fshape, target, timestamp, fframe, abcorr, locus, observer, rayfrm, dvec, bbox
+    )
+
+    if in_fov and in_bbox:
         results_list.append({
             'GNSS': gnss_name,
             'LEO': leo_name,
@@ -161,10 +162,12 @@ def process_occultation(leo_id, gnss_id, timestamp, gnss_name, leo_name,
             'lat_gnss_deg': lat_gnss_deg,
         })
 
-def find_RO_occultations(leo_path, gnss_path, et1, et2):
+def find_RO_occultations(leo_path, gnss_path, et1, et2, bbox):
     """
     Finds radio occultations between a LEO and GNSS satellite within the given ephemeris time window.
-    
+
+    bbox: (min_lat, max_lat, min_lon, max_lon) in degrees for tangent-point filtering.
+
     Returns a pandas DataFrame with occultation details.
     """
     load_spice_kernels(leo_path, gnss_path)
@@ -186,15 +189,17 @@ def find_RO_occultations(leo_path, gnss_path, et1, et2):
     for i in range(num_intervals):
         start, stop = spice.wnfetd(result, i)
         process_occultation(leo_id, gnss_id, start, gnss_name, leo_name,
-                            results_list, fshape, target, fframe, abcorr, locus, observer, rayfrm)
+                            results_list, fshape, target, fframe, abcorr, locus, observer, rayfrm, bbox)
         process_occultation(leo_id, gnss_id, stop, gnss_name, leo_name,
-                            results_list, fshape, target, fframe, abcorr, locus, observer, rayfrm)
+                            results_list, fshape, target, fframe, abcorr, locus, observer, rayfrm, bbox)
     occultations_df = pd.DataFrame(results_list)
     return occultations_df
 
-def run_occultation(leo_folder, gnss_folder, csv_file_path, start_date, end_date):
+def run_occultation(leo_folder, gnss_folder, csv_file_path, start_date, end_date, bbox):
     """
     Runs the occultation analysis over the specified date range using the given folders.
+
+    bbox: (min_lat, max_lat, min_lon, max_lon) in degrees for tangent-point filtering.
     """
     import spiceypy as spice
     import pandas as pd
@@ -217,7 +222,7 @@ def run_occultation(leo_folder, gnss_folder, csv_file_path, start_date, end_date
             for leo_path in leo_files:
                 try:
                     print(f"Processing {path.basename(leo_path)} and {path.basename(gnss_path)} for date {date.strftime('%Y-%m-%d')}...")
-                    temp_df = find_RO_occultations(leo_path, gnss_path, et1, et2)
+                    temp_df = find_RO_occultations(leo_path, gnss_path, et1, et2, bbox)
                     temp_df.to_csv(csv_file_path, mode='a', header=not path.getsize(csv_file_path) > 0, index=False)
                     spice.kclear()
                 except Exception as e:

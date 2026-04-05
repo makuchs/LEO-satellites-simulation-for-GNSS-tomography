@@ -99,6 +99,8 @@ GNSSR_MAX_WORKERS = 4
 OCC_CSV_FILE = os.path.join(OUTPUT_DIR, "occultation_results.csv")
 OCC_START_DATE = "2022-01-03"
 OCC_END_DATE = "2022-01-10"
+# Tangent-point filter: (min_lat, max_lat, min_lon, max_lon) in degrees.
+OCC_BBOX = (-8.0, 4.0, 46.0, 58.0)
 
 # ---------- Compare (MODE="compare") ----------
 CMP_SP3_FILE = GNSS_SP3_FILE
@@ -209,6 +211,7 @@ def main() -> None:
             csv_file_path=OCC_CSV_FILE,
             start_date=OCC_START_DATE,
             end_date=OCC_END_DATE,
+            bbox=OCC_BBOX,
         )
 
     elif MODE == "gnssr":
