@@ -192,7 +192,6 @@ def interpolate_sp3(df_file, simulation_start_date, interval_between_epochs, num
     """
     Interpolates SP3 satellite positions to match TLE epochs.
     """
-    ...
     df = pd.read_csv(df_file)
     df["Epoch"] = pd.to_datetime(df["Epoch"])
     start_time = datetime.strptime(simulation_start_date, "%Y-%m-%d %H:%M:%S")
@@ -428,10 +427,11 @@ def run_constellation_simulation(observer_position, simulation_start_date, inter
             sats_leo_ids, sats_gnss_ids = [], []
 
             match = points.loc[points["Name"] == reference, "Elevation"]
-            if not match.empty:
-                elevation_value = match.iloc[0]
-                if isinstance(elevation_value, str):
-                    elevation_value = ast.literal_eval(elevation_value)
+            if match.empty:
+                continue
+            elevation_value = match.iloc[0]
+            if isinstance(elevation_value, str):
+                elevation_value = ast.literal_eval(elevation_value)
 
             group_gnss = sp3_enu_az_el[(sp3_enu_az_el["Epoch"] == epoch) & (sp3_enu_az_el["Reference"] == reference)]
             
