@@ -309,6 +309,57 @@ def remove_duplicate_epochs(times, positions, velocities, tol=1e-9):
 
     return new_times, new_positions, new_velocities
 
+def list_sp3_satellite_ids(sp3_file):
+    """
+    Return sorted unique satellite ID strings from SP3 position records (first column
+    of each XYZ line under a valid ``*`` epoch). Uses the same epoch/line rules as
+    ``parse_sp3_positions`` so the listed IDs are those that can be kernelized.
+    """
+    seen = set()
+    current_epoch = None
+
+    with open(sp3_file, "r") as f:
+        for line in f:
+            line = line.rstrip()
+            if not line:
+                continue
+
+            if line.startswith("*"):
+                tokens = line[1:].strip().split()
+                if len(tokens) < 6:
+                    current_epoch = None
+                    continue
+                year = int(tokens[0])
+                month = int(tokens[1])
+                day = int(tokens[2])
+                hour = int(tokens[3])
+                minute = int(tokens[4])
+                second = float(tokens[5])
+                sec_int = int(second)
+                micro = int(round((second - sec_int) * 1e6))
+                current_epoch = datetime.datetime(
+                    year, month, day, hour, minute, sec_int, micro
+                )
+                continue
+
+            if current_epoch is None:
+                continue
+
+            tokens = line.split()
+            if len(tokens) < 4:
+                continue
+            try:
+                float(tokens[1])
+                float(tokens[2])
+                float(tokens[3])
+            except ValueError:
+                continue
+            seen.add(tokens[0])
+
+    if not seen:
+        raise ValueError(f"No satellite position records found in {sp3_file!r}.")
+    return sorted(seen)
+
 def parse_sp3_positions(sp3_file, sat_id, unit_is_km=True):
     """
     Parse an SP3 file and return epochs (datetime list) and ITRF/ECEF positions (Nx3, km).
@@ -450,17 +501,36 @@ def write_sp3_spice_kernel(sp3_file, sat_id, naif_id, kernel_filename,
     vel_ecef_km_s = finite_difference_velocities(pos_ecef_km, step_seconds=step_seconds if step_seconds else 1)
     p_j2000, v_j2000 = itrf_to_gcrs(epochs, pos_ecef_km, vel_ecef_km_s)
 
-    et_times = np.array([spice.utc2et(e.strftime("%Y-%m-%dT%H:%M:%S")) for e in epochs], dtype=float)
+    def _epoch_to_utc_str(e):
+        if e.microsecond:
+            return e.strftime("%Y-%m-%dT%H:%M:%S.%f")
+        return e.strftime("%Y-%m-%dT%H:%M:%S")
+
+    et_raw = np.array([spice.utc2et(_epoch_to_utc_str(e)) for e in epochs], dtype=np.float64)
+    n_et = len(et_raw)
+    if n_et >= 2:
+        # SPKW08 requires a uniform ET grid; per-epoch utc2et floats can drift and trigger COVERAGEGAP.
+        et0 = float(et_raw[0])
+        step_et = float(et_raw[1] - et_raw[0])
+        et_times = et0 + np.arange(n_et, dtype=np.float64) * step_et
+    else:
+        et_times = et_raw.astype(np.float64)
+
     states_matrix = np.hstack((p_j2000, v_j2000)).tolist()
 
     if segid is None:
         segid = f"SP3_SPK_{sat_id}"
 
+    if len(et_times) > 1:
+        step_for_spk = float(et_times[1] - et_times[0])
+    else:
+        step_for_spk = float(step_seconds if step_seconds else 1)
+
     handle = spice.spkopn(kernel_filename, f"SPK from SP3 for {sat_id}", 0)
     spice.spkw08(handle, int(naif_id), int(center_id), frame,
                  float(et_times[0]), float(et_times[-1]),
                  segid, 7, len(et_times), states_matrix,
-                 float(et_times[0]), float(step_seconds if step_seconds else 1))
+                 float(et_times[0]), step_for_spk)
     spice.spkcls(handle)
     print(f"SPK kernel '{kernel_filename}' created successfully from SP3 for sat {sat_id} (NAIF ID {naif_id}).")
     return epochs, pos_ecef_km
