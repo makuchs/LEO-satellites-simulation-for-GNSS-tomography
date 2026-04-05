@@ -22,9 +22,18 @@ import spiceypy as spice
 from spiceypy.utils.support_types import SPICEINT_CELL, SPICEDOUBLE_CELL
 from project_paths import DE432_FILE, EARTH_BPC_FILE, LSK_FILE, PCK_TPC_FILE
 
+# Populated by _earth_radii_and_flattening(); cleared whenever spice.kclear() runs in this module.
+_EARTH_RADII_FLAT_CACHE = None
+
+
+def _invalidate_earth_geometry_cache():
+    global _EARTH_RADII_FLAT_CACHE
+    _EARTH_RADII_FLAT_CACHE = None
+
 
 def load_spice_kernels(leo_path, gnss_path):
     spice.kclear()
+    _invalidate_earth_geometry_cache()
     spice.furnsh(str(LSK_FILE))
     spice.furnsh(str(PCK_TPC_FILE))
     spice.furnsh(str(DE432_FILE))
@@ -36,6 +45,7 @@ def load_spice_kernels(leo_path, gnss_path):
 
 def load_time_kernel():
     spice.kclear()
+    _invalidate_earth_geometry_cache()
     spice.furnsh(str(LSK_FILE))
 
 
@@ -82,11 +92,15 @@ def filter_epochs_by_windows(epochs, windows):
 
 
 def _earth_radii_and_flattening():
+    global _EARTH_RADII_FLAT_CACHE
+    if _EARTH_RADII_FLAT_CACHE is not None:
+        return _EARTH_RADII_FLAT_CACHE
     radii = spice.bodvrd("EARTH", "RADII", 3)[1]
     re = float(radii[0])
     rp = float(radii[2])
     f = (re - rp) / re
-    return re, rp, f
+    _EARTH_RADII_FLAT_CACHE = (re, rp, f)
+    return _EARTH_RADII_FLAT_CACHE
 
 
 def _state_in_frame(target_id, et, out_frame="J2000", abcorr="NONE", obs="EARTH"):
@@ -429,6 +443,7 @@ def _format_output_df(df):
 
 def _init_base_kernels_for_worker():
     spice.kclear()
+    _invalidate_earth_geometry_cache()
     spice.furnsh(str(LSK_FILE))
     spice.furnsh(str(PCK_TPC_FILE))
     spice.furnsh(str(DE432_FILE))
@@ -537,6 +552,7 @@ def run_gnssr_single_leo(
 
     try:
         spice.kclear()
+        _invalidate_earth_geometry_cache()
     except Exception:
         pass
 
