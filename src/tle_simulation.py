@@ -425,14 +425,24 @@ def write_positions_csv_ecef_from_epochs(csv_filename, epochs_dt, pos_ecef_km):
 
 def write_sp3_spice_kernel(sp3_file, sat_id, naif_id, kernel_filename,
                            step_seconds=1, unit_is_km=True,
-                           center_id=399, frame="J2000", segid=None):
+                           center_id=399, frame="J2000", segid=None,
+                           epochs_dt=None, pos_ecef_km=None):
     """
     Generate an SPK (type 8) kernel from an SP3 precise ephemeris file for a single satellite.
     The SP3 is assumed to provide positions in ITRF/ECEF; velocities are estimated by finite differences.
+
+    If epochs_dt and pos_ecef_km are provided, sp3_file is not read (same arrays as from parse_sp3_positions).
+
+    Returns (epochs_dt, pos_ecef_km) after any resampling — the same samples written into the SPK.
     """
     load_spice_kernels()
 
-    epochs, pos_ecef_km = parse_sp3_positions(sp3_file, sat_id=sat_id, unit_is_km=unit_is_km)
+    if (epochs_dt is None) ^ (pos_ecef_km is None):
+        raise ValueError("epochs_dt and pos_ecef_km must both be set or both omitted.")
+    if epochs_dt is not None:
+        epochs, pos_ecef_km = epochs_dt, pos_ecef_km
+    else:
+        epochs, pos_ecef_km = parse_sp3_positions(sp3_file, sat_id=sat_id, unit_is_km=unit_is_km)
 
     if step_seconds is not None and step_seconds > 0:
         epochs, pos_ecef_km = resample_positions(epochs, pos_ecef_km, step_seconds=step_seconds)
@@ -453,6 +463,7 @@ def write_sp3_spice_kernel(sp3_file, sat_id, naif_id, kernel_filename,
                  float(et_times[0]), float(step_seconds if step_seconds else 1))
     spice.spkcls(handle)
     print(f"SPK kernel '{kernel_filename}' created successfully from SP3 for sat {sat_id} (NAIF ID {naif_id}).")
+    return epochs, pos_ecef_km
 
 def run_simulation(input_file, csv_output=None, output_folder="output",
                    source="auto", sp3_sat_id=None, sp3_naif_id=None,
@@ -511,7 +522,7 @@ def run_simulation(input_file, csv_output=None, output_folder="output",
             raise ValueError("SP3 mode requires sp3_sat_id and sp3_naif_id.")
 
         print("Parsing SP3 and building SPK...")
-        write_sp3_spice_kernel(
+        epochs, pos_ecef_km = write_sp3_spice_kernel(
             sp3_file=input_file,
             sat_id=sp3_sat_id,
             naif_id=sp3_naif_id,
@@ -522,9 +533,6 @@ def run_simulation(input_file, csv_output=None, output_folder="output",
 
         if write_csv:
             print("Writing ECEF positions to CSV for comparison...")
-            epochs, pos_ecef_km = parse_sp3_positions(input_file, sat_id=sp3_sat_id, unit_is_km=sp3_unit_is_km)
-            if sp3_step_seconds is not None and sp3_step_seconds > 0:
-                epochs, pos_ecef_km = resample_positions(epochs, pos_ecef_km, step_seconds=sp3_step_seconds)
             write_positions_csv_ecef_from_epochs(csv_output, epochs, pos_ecef_km)
         else:
             print("Skipping CSV generation.")
