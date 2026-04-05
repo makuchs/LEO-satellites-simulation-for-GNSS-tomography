@@ -75,11 +75,14 @@ def lon_lat_in_bbox(lon_deg, lat_deg, bbox):
     """
     True if (lon_deg, lat_deg) lies inside bbox.
 
-    bbox: (min_lat, max_lat, min_lon, max_lon) in degrees.
+    bbox: (min_lat, max_lat, min_lon, max_lon) in degrees, or None to skip the
+    geographic filter (still requires finite tangent lon/lat).
     Missing coordinates (e.g. failed tangent computation) yield False.
     """
     if lon_deg is None or lat_deg is None:
         return False
+    if bbox is None:
+        return True
     min_lat, max_lat, min_lon, max_lon = bbox
     return (min_lat <= lat_deg <= max_lat) and (min_lon <= lon_deg <= max_lon)
 
@@ -169,7 +172,8 @@ def find_RO_occultations(leo_path, gnss_path, et1, et2, bbox, load_kernels=True)
     """
     Finds radio occultations between a LEO and GNSS satellite within the given ephemeris time window.
 
-    bbox: (min_lat, max_lat, min_lon, max_lon) in degrees for tangent-point filtering.
+    bbox: (min_lat, max_lat, min_lon, max_lon) in degrees for tangent-point filtering,
+    or None to disable geographic filtering.
 
     If load_kernels is True (default), clears the pool and loads this pair's SPKs plus
     common kernels. Set load_kernels=False when the pool was already loaded (e.g. via
@@ -207,7 +211,8 @@ def run_occultation(leo_folder, gnss_folder, csv_file_path, start_date, end_date
     """
     Runs the occultation analysis over the specified date range using the given folders.
 
-    bbox: (min_lat, max_lat, min_lon, max_lon) in degrees for tangent-point filtering.
+    bbox: (min_lat, max_lat, min_lon, max_lon) in degrees for tangent-point filtering,
+    or None to keep all tangent points with valid coordinates (FOV filter still applies).
     """
     dates = pd.date_range(start=start_date, end=end_date, freq='D')
 
