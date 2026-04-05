@@ -58,27 +58,17 @@ def get_name_and_id_from_path(path):
     name = parts[1] if len(parts) > 1 else "Unknown"
     return name, sat_id
 
-def is_point_in_bounding_box(fshape, target, start, fframe, abcorr, locus, observer, rayfrm, dvec, bbox):
+def lon_lat_in_bbox(lon_deg, lat_deg, bbox):
     """
-    Determines if the tangent point lies inside a geographic bounding box.
+    True if (lon_deg, lat_deg) lies inside bbox.
 
     bbox: (min_lat, max_lat, min_lon, max_lon) in degrees.
-
-    Returns (in_bbox, lon_deg, lat_deg), or (False, None, None) on failure.
+    Missing coordinates (e.g. failed tangent computation) yield False.
     """
+    if lon_deg is None or lat_deg is None:
+        return False
     min_lat, max_lat, min_lon, max_lon = bbox
-    try:
-        tangent_point, _, _, _, _, _ = spice.tangpt(fshape, target, start, fframe, abcorr, locus, observer, rayfrm, dvec)
-        _, lon, lat = spice.reclat(tangent_point)
-        lon_deg = spice.convrt(lon, 'RADIANS', 'DEGREES')
-        lat_deg = spice.convrt(lat, 'RADIANS', 'DEGREES')
-
-        in_bbox = (min_lat <= lat_deg <= max_lat) and (min_lon <= lon_deg <= max_lon)
-
-        return in_bbox, lon_deg, lat_deg
-    except Exception as e:
-        print(f"Error: {e}")
-        return False, None, None
+    return (min_lat <= lat_deg <= max_lat) and (min_lon <= lon_deg <= max_lon)
 
 def convert_to_lat_long(start, pos_leo, pos_gnss):
     """
@@ -129,7 +119,9 @@ def process_occultation(leo_id, gnss_id, timestamp, gnss_name, leo_name,
     dvec = np.subtract(pos_gnss, pos_leo)
     
     try:
-        tangent_point, srfpt, _, _, _, _ = spice.tangpt(fshape, target, timestamp, fframe, abcorr, locus, observer, rayfrm, dvec)
+        tangent_point, _, _, _, _, _ = spice.tangpt(
+            fshape, target, timestamp, fframe, abcorr, locus, observer, rayfrm, dvec
+        )
         _, lon, lat = spice.reclat(tangent_point)
         lon_deg = spice.convrt(lon, 'RADIANS', 'DEGREES')
         lat_deg = spice.convrt(lat, 'RADIANS', 'DEGREES')
@@ -143,9 +135,7 @@ def process_occultation(leo_id, gnss_id, timestamp, gnss_name, leo_name,
     pos_gnss_fov = state_gnss[:3]
     los_vector = spice.vsub(pos_gnss_fov, pos_leo_fov)
     in_fov = is_within_fov(vel_leo_fov, los_vector)
-    in_bbox, _, _ = is_point_in_bounding_box(
-        fshape, target, timestamp, fframe, abcorr, locus, observer, rayfrm, dvec, bbox
-    )
+    in_bbox = lon_lat_in_bbox(lon_deg, lat_deg, bbox)
 
     if in_fov and in_bbox:
         results_list.append({
