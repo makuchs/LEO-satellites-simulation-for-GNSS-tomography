@@ -14,6 +14,15 @@ import numpy as np
 import pandas as pd
 import spiceypy as spice
 
+def _kernel_coverage_bounds(kernel_path, body_id):
+    cover = spice.cell_double(200000)
+    spice.spkcov(kernel_path, int(body_id), cover)
+    if spice.wncard(cover) == 0:
+        return None, None
+    start, _ = spice.wnfetd(cover, 0)
+    _, stop = spice.wnfetd(cover, spice.wncard(cover) - 1)
+    return start, stop
+
 def load_occultation_kernel_pool(leo_paths, gnss_paths):
     """
     Clears the kernel pool and loads leap seconds, planetary and Earth orientation
@@ -185,6 +194,13 @@ def find_RO_occultations(leo_path, gnss_path, et1, et2, bbox, load_kernels=True)
         load_spice_kernels(leo_path, gnss_path)
     leo_name, leo_id = get_name_and_id_from_path(leo_path)
     gnss_name, gnss_id = get_name_and_id_from_path(gnss_path)
+
+    leo_start, leo_stop = _kernel_coverage_bounds(leo_path, leo_id)
+    gnss_start, gnss_stop = _kernel_coverage_bounds(gnss_path, gnss_id)
+    et1_clamped = max(et1, leo_start, gnss_start)
+    et2_clamped = min(et2, leo_stop, gnss_stop)
+    if et1_clamped >= et2_clamped:
+        return pd.DataFrame([])
     
     rayfrm = "J2000"
     locus = "TANGENT POINT"
@@ -192,7 +208,7 @@ def find_RO_occultations(leo_path, gnss_path, et1, et2, bbox, load_kernels=True)
     back, bshape, bframe, observer, abcorr = gnss_id, 'POINT', 'IAU_EARTH', leo_id, 'NONE'
     step, MAXWIN = 30, 50000
     confine = spice.cell_double(2 * MAXWIN)
-    spice.wninsd(et1, et2, confine)
+    spice.wninsd(et1_clamped, et2_clamped, confine)
     result = spice.cell_double(MAXWIN)
     spice.gfoclt(occtype, front, fshape, fframe, back, bshape, bframe, abcorr, observer, step, confine, result)
     target = front
