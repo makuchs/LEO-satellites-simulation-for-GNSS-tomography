@@ -22,9 +22,24 @@ import spiceypy as spice
 from spiceypy.utils.support_types import SPICEINT_CELL, SPICEDOUBLE_CELL
 from project_paths import DE432_FILE, EARTH_BPC_FILE, LSK_FILE, PCK_TPC_FILE
 
+# Shared by process_gnssr_epoch() and batch runners. Pass None for inc_max / bistatic / excess to disable that filter.
+DEFAULT_GNSSR_INC_MAX_DEG = 75.0
+DEFAULT_GNSSR_BISTATIC_MAX_DEG = 60.0
+DEFAULT_GNSSR_EXCESS_MAX_KM = 200.0
+DEFAULT_GNSSR_END_TIME_UTC = "23:59:59"
+
+# Populated by _earth_radii_and_flattening(); cleared whenever spice.kclear() runs in this module.
+_EARTH_RADII_FLAT_CACHE = None
+
+
+def _invalidate_earth_geometry_cache():
+    global _EARTH_RADII_FLAT_CACHE
+    _EARTH_RADII_FLAT_CACHE = None
+
 
 def load_spice_kernels(leo_path, gnss_path):
     spice.kclear()
+    _invalidate_earth_geometry_cache()
     spice.furnsh(str(LSK_FILE))
     spice.furnsh(str(PCK_TPC_FILE))
     spice.furnsh(str(DE432_FILE))
@@ -36,6 +51,7 @@ def load_spice_kernels(leo_path, gnss_path):
 
 def load_time_kernel():
     spice.kclear()
+    _invalidate_earth_geometry_cache()
     spice.furnsh(str(LSK_FILE))
 
 
@@ -82,11 +98,15 @@ def filter_epochs_by_windows(epochs, windows):
 
 
 def _earth_radii_and_flattening():
+    global _EARTH_RADII_FLAT_CACHE
+    if _EARTH_RADII_FLAT_CACHE is not None:
+        return _EARTH_RADII_FLAT_CACHE
     radii = spice.bodvrd("EARTH", "RADII", 3)[1]
     re = float(radii[0])
     rp = float(radii[2])
     f = (re - rp) / re
-    return re, rp, f
+    _EARTH_RADII_FLAT_CACHE = (re, rp, f)
+    return _EARTH_RADII_FLAT_CACHE
 
 
 def _state_in_frame(target_id, et, out_frame="J2000", abcorr="NONE", obs="EARTH"):
@@ -335,9 +355,9 @@ def process_gnssr_epoch(
     bbox=None,
     specular_err_max=0.15,
     inc_min_deg=None,
-    inc_max_deg=75.0,
-    bistatic_max_deg=60.0,
-    excess_max_km=200.0,
+    inc_max_deg=DEFAULT_GNSSR_INC_MAX_DEG,
+    bistatic_max_deg=DEFAULT_GNSSR_BISTATIC_MAX_DEG,
+    excess_max_km=DEFAULT_GNSSR_EXCESS_MAX_KM,
     los_tol_km=0.01,
     bbox_guided_search=False,
     bbox_grid_deg=1.0,
@@ -429,6 +449,7 @@ def _format_output_df(df):
 
 def _init_base_kernels_for_worker():
     spice.kclear()
+    _invalidate_earth_geometry_cache()
     spice.furnsh(str(LSK_FILE))
     spice.furnsh(str(PCK_TPC_FILE))
     spice.furnsh(str(DE432_FILE))
@@ -443,14 +464,14 @@ def run_gnssr_single_leo(
     start_date,
     end_date,
     start_time_utc="00:00:00",
-    end_time_utc="23:00:00",
+    end_time_utc=DEFAULT_GNSSR_END_TIME_UTC,
     bbox=None,
     step_seconds=3600,
     specular_err_max=1.0,
     inc_min_deg=None,
-    inc_max_deg=None,
-    bistatic_max_deg=None,
-    excess_max_km=None,
+    inc_max_deg=DEFAULT_GNSSR_INC_MAX_DEG,
+    bistatic_max_deg=DEFAULT_GNSSR_BISTATIC_MAX_DEG,
+    excess_max_km=DEFAULT_GNSSR_EXCESS_MAX_KM,
     los_tol_km=0.01,
     bbox_guided_search=True,
     bbox_grid_deg=0.25,
@@ -537,6 +558,7 @@ def run_gnssr_single_leo(
 
     try:
         spice.kclear()
+        _invalidate_earth_geometry_cache()
     except Exception:
         pass
 
@@ -550,14 +572,14 @@ def run_gnssr(
     start_date,
     end_date,
     start_time_utc="00:00:00",
-    end_time_utc="23:00:00",
+    end_time_utc=DEFAULT_GNSSR_END_TIME_UTC,
     bbox=None,
     step_seconds=3600,
     specular_err_max=1.0,
     inc_min_deg=None,
-    inc_max_deg=None,
-    bistatic_max_deg=None,
-    excess_max_km=None,
+    inc_max_deg=DEFAULT_GNSSR_INC_MAX_DEG,
+    bistatic_max_deg=DEFAULT_GNSSR_BISTATIC_MAX_DEG,
+    excess_max_km=DEFAULT_GNSSR_EXCESS_MAX_KM,
     los_tol_km=0.01,
     bbox_guided_search=True,
     bbox_grid_deg=0.25,
@@ -641,14 +663,14 @@ def run_gnssr_subprocess_per_leo(
     start_date,
     end_date,
     start_time_utc="00:00:00",
-    end_time_utc="23:00:00",
+    end_time_utc=DEFAULT_GNSSR_END_TIME_UTC,
     bbox=None,
     step_seconds=3600,
     specular_err_max=1.0,
     inc_min_deg=None,
-    inc_max_deg=None,
-    bistatic_max_deg=None,
-    excess_max_km=None,
+    inc_max_deg=DEFAULT_GNSSR_INC_MAX_DEG,
+    bistatic_max_deg=DEFAULT_GNSSR_BISTATIC_MAX_DEG,
+    excess_max_km=DEFAULT_GNSSR_EXCESS_MAX_KM,
     los_tol_km=0.01,
     bbox_guided_search=True,
     bbox_grid_deg=0.25,
@@ -769,14 +791,14 @@ if __name__ == "__main__":
     parser.add_argument("--start-date")
     parser.add_argument("--end-date")
     parser.add_argument("--start-time-utc", default="00:00:00")
-    parser.add_argument("--end-time-utc", default="23:00:00")
+    parser.add_argument("--end-time-utc", default=DEFAULT_GNSSR_END_TIME_UTC)
     parser.add_argument("--bbox", default="None")
     parser.add_argument("--step-seconds", type=int, default=3600)
     parser.add_argument("--specular-err-max", type=float, default=1.0)
     parser.add_argument("--inc-min-deg", default="None")
-    parser.add_argument("--inc-max-deg", default="None")
-    parser.add_argument("--bistatic-max-deg", default="None")
-    parser.add_argument("--excess-max-km", default="None")
+    parser.add_argument("--inc-max-deg", default=str(DEFAULT_GNSSR_INC_MAX_DEG))
+    parser.add_argument("--bistatic-max-deg", default=str(DEFAULT_GNSSR_BISTATIC_MAX_DEG))
+    parser.add_argument("--excess-max-km", default=str(DEFAULT_GNSSR_EXCESS_MAX_KM))
     parser.add_argument("--los-tol-km", type=float, default=0.01)
     parser.add_argument("--bbox-guided-search", default="1")
     parser.add_argument("--bbox-grid-deg", default="0.25")

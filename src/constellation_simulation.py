@@ -35,7 +35,7 @@ def process_subconstellation(simulation_start_date, interval_between_epochs, num
     Args:
         YEAR, MONTH, DAY, HOUR, MINUTE: start epoch
         INTERVAL_IN_SECONDS: time step between epochs
-        NUMBER_OF_EPOCHS: number of epochs to compute
+        NUMBER_OF_EPOCHS: number of steps after start (produces NUMBER_OF_EPOCHS + 1 time samples)
         tle_folder: folder containing TLE files
         output_file: path to save resulting CSV
     Returns:
@@ -116,7 +116,7 @@ def process_sp3_folder(simulation_start_date, interval_between_epochs, number_of
     start_timer = time.time()
 
     start_epoch = datetime.strptime(simulation_start_date, "%Y-%m-%d %H:%M:%S")
-    epochs = [start_epoch + timedelta(seconds=interval_between_epochs * i) for i in range(number_of_epochs)]
+    epochs = [start_epoch + timedelta(seconds=interval_between_epochs * i) for i in range(number_of_epochs + 1)]
 
     systems = ["G", "R", "E", "C"]
     prn_range = range(1, 61)
@@ -192,11 +192,10 @@ def interpolate_sp3(df_file, simulation_start_date, interval_between_epochs, num
     """
     Interpolates SP3 satellite positions to match TLE epochs.
     """
-    ...
     df = pd.read_csv(df_file)
     df["Epoch"] = pd.to_datetime(df["Epoch"])
     start_time = datetime.strptime(simulation_start_date, "%Y-%m-%d %H:%M:%S")
-    end_time = start_time + timedelta(seconds=interval_between_epochs * (number_of_epochs - 1))
+    end_time = start_time + timedelta(seconds=interval_between_epochs * number_of_epochs)
     df = df[df["Epoch"].between(start_time, end_time)]
 
     def resample_sat(group):
@@ -428,10 +427,11 @@ def run_constellation_simulation(observer_position, simulation_start_date, inter
             sats_leo_ids, sats_gnss_ids = [], []
 
             match = points.loc[points["Name"] == reference, "Elevation"]
-            if not match.empty:
-                elevation_value = match.iloc[0]
-                if isinstance(elevation_value, str):
-                    elevation_value = ast.literal_eval(elevation_value)
+            if match.empty:
+                continue
+            elevation_value = match.iloc[0]
+            if isinstance(elevation_value, str):
+                elevation_value = ast.literal_eval(elevation_value)
 
             group_gnss = sp3_enu_az_el[(sp3_enu_az_el["Epoch"] == epoch) & (sp3_enu_az_el["Reference"] == reference)]
             

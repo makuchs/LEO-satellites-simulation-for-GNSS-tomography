@@ -14,20 +14,42 @@ import numpy as np
 import pandas as pd
 import spiceypy as spice
 
-def load_spice_kernels(leo_path, gnss_path):
+def _kernel_coverage_bounds(kernel_path, body_id):
+    cover = spice.cell_double(200000)
+    spice.spkcov(kernel_path, int(body_id), cover)
+    if spice.wncard(cover) == 0:
+        return None, None
+    start, _ = spice.wnfetd(cover, 0)
+    _, stop = spice.wnfetd(cover, spice.wncard(cover) - 1)
+    return start, stop
+
+def load_occultation_kernel_pool(leo_paths, gnss_paths):
     """
-    Loads the SPICE kernels for the LEO and GNSS satellites from the repository's kernels folder.
+    Clears the kernel pool and loads leap seconds, planetary and Earth orientation
+    kernels, then every LEO and GNSS SPK path given (e.g. .bsp files).
+
+    Call once before iterating many (LEO, GNSS, time window) combinations.
     """
     BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     KERNELS_DIR = os.path.join(BASE_DIR, "kernels")
-    
+
     spice.kclear()
     spice.furnsh(os.path.join(KERNELS_DIR, "lsk", "naif0012.tls"))
     spice.furnsh(os.path.join(KERNELS_DIR, "pck", "pck00011.tpc"))
     spice.furnsh(os.path.join(KERNELS_DIR, "spk", "de432s.bsp"))
     spice.furnsh(os.path.join(KERNELS_DIR, "pck", "earth_000101_241106_240813.bpc"))
-    spice.furnsh(leo_path)
-    spice.furnsh(gnss_path)
+    for p in leo_paths:
+        spice.furnsh(p)
+    for p in gnss_paths:
+        spice.furnsh(p)
+
+
+def load_spice_kernels(leo_path, gnss_path):
+    """
+    Loads the SPICE kernels for a single LEO and GNSS satellite pair (same pool layout
+    as load_occultation_kernel_pool).
+    """
+    load_occultation_kernel_pool([leo_path], [gnss_path])
 
 def load_time_kernel():
     """
@@ -58,28 +80,20 @@ def get_name_and_id_from_path(path):
     name = parts[1] if len(parts) > 1 else "Unknown"
     return name, sat_id
 
-def is_point_in_poland(fshape, target, start, fframe, abcorr, locus, observer, rayfrm, dvec):
+def lon_lat_in_bbox(lon_deg, lat_deg, bbox):
     """
-    Determines if a computed tangent point is within Poland.
-    
-    Returns a tuple: (is_in_poland, longitude, latitude)
+    True if (lon_deg, lat_deg) lies inside bbox.
+
+    bbox: (min_lat, max_lat, min_lon, max_lon) in degrees, or None to skip the
+    geographic filter (still requires finite tangent lon/lat).
+    Missing coordinates (e.g. failed tangent computation) yield False.
     """
-    try:
-        tangent_point, _, _, _, _, _ = spice.tangpt(fshape, target, start, fframe, abcorr, locus, observer, rayfrm, dvec)
-        _, lon, lat = spice.reclat(tangent_point)
-        lon_deg = spice.convrt(lon, 'RADIANS', 'DEGREES')
-        lat_deg = spice.convrt(lat, 'RADIANS', 'DEGREES')
-        
-        poland_lat_bounds = (-8, 4)   # 8°S to 4°N
-        poland_lon_bounds = (46, 58)  # 46°E to 58°E
-
-        is_in_poland = (poland_lat_bounds[0] <= lat_deg <= poland_lat_bounds[1]) and \
-                       (poland_lon_bounds[0] <= lon_deg <= poland_lon_bounds[1])
-
-        return is_in_poland, lon_deg, lat_deg
-    except Exception as e:
-        print(f"Error: {e}")
+    if lon_deg is None or lat_deg is None:
         return False
+    if bbox is None:
+        return True
+    min_lat, max_lat, min_lon, max_lon = bbox
+    return (min_lat <= lat_deg <= max_lat) and (min_lon <= lon_deg <= max_lon)
 
 def convert_to_lat_long(start, pos_leo, pos_gnss):
     """
@@ -118,10 +132,10 @@ def is_within_fov(vel_vector, los_vector, fov_angle_deg=55):
     return in_fov_ram or in_fov_wake
 
 def process_occultation(leo_id, gnss_id, timestamp, gnss_name, leo_name,
-                        results_list, fshape, target, fframe, abcorr, locus, observer, rayfrm):
+                        results_list, fshape, target, fframe, abcorr, locus, observer, rayfrm, bbox):
     """
     Processes a single occultation event, extracting position information
-    and checking if the event is within the field-of-view and over Poland.
+    and checking if the event is within the field-of-view and inside the bounding box.
     """
     start_utc = spice.timout(timestamp, "YYYY-MM-DD HR:MN:SC ::UTC")
     pos_leo, _ = spice.spkpos(leo_id, timestamp, 'J2000', 'NONE', 'EARTH')
@@ -130,7 +144,9 @@ def process_occultation(leo_id, gnss_id, timestamp, gnss_name, leo_name,
     dvec = np.subtract(pos_gnss, pos_leo)
     
     try:
-        tangent_point, srfpt, _, _, _, _ = spice.tangpt(fshape, target, timestamp, fframe, abcorr, locus, observer, rayfrm, dvec)
+        tangent_point, _, _, _, _, _ = spice.tangpt(
+            fshape, target, timestamp, fframe, abcorr, locus, observer, rayfrm, dvec
+        )
         _, lon, lat = spice.reclat(tangent_point)
         lon_deg = spice.convrt(lon, 'RADIANS', 'DEGREES')
         lat_deg = spice.convrt(lat, 'RADIANS', 'DEGREES')
@@ -144,9 +160,9 @@ def process_occultation(leo_id, gnss_id, timestamp, gnss_name, leo_name,
     pos_gnss_fov = state_gnss[:3]
     los_vector = spice.vsub(pos_gnss_fov, pos_leo_fov)
     in_fov = is_within_fov(vel_leo_fov, los_vector)
-    is_in = is_point_in_poland(fshape, target, timestamp, fframe, abcorr, locus, observer, rayfrm, dvec)
-    
-    if in_fov and is_in:
+    in_bbox = lon_lat_in_bbox(lon_deg, lat_deg, bbox)
+
+    if in_fov and in_bbox:
         results_list.append({
             'GNSS': gnss_name,
             'LEO': leo_name,
@@ -161,15 +177,30 @@ def process_occultation(leo_id, gnss_id, timestamp, gnss_name, leo_name,
             'lat_gnss_deg': lat_gnss_deg,
         })
 
-def find_RO_occultations(leo_path, gnss_path, et1, et2):
+def find_RO_occultations(leo_path, gnss_path, et1, et2, bbox, load_kernels=True):
     """
     Finds radio occultations between a LEO and GNSS satellite within the given ephemeris time window.
-    
+
+    bbox: (min_lat, max_lat, min_lon, max_lon) in degrees for tangent-point filtering,
+    or None to disable geographic filtering.
+
+    If load_kernels is True (default), clears the pool and loads this pair's SPKs plus
+    common kernels. Set load_kernels=False when the pool was already loaded (e.g. via
+    load_occultation_kernel_pool for all LEO/GNSS files).
+
     Returns a pandas DataFrame with occultation details.
     """
-    load_spice_kernels(leo_path, gnss_path)
+    if load_kernels:
+        load_spice_kernels(leo_path, gnss_path)
     leo_name, leo_id = get_name_and_id_from_path(leo_path)
     gnss_name, gnss_id = get_name_and_id_from_path(gnss_path)
+
+    leo_start, leo_stop = _kernel_coverage_bounds(leo_path, leo_id)
+    gnss_start, gnss_stop = _kernel_coverage_bounds(gnss_path, gnss_id)
+    et1_clamped = max(et1, leo_start, gnss_start)
+    et2_clamped = min(et2, leo_stop, gnss_stop)
+    if et1_clamped >= et2_clamped:
+        return pd.DataFrame([])
     
     rayfrm = "J2000"
     locus = "TANGENT POINT"
@@ -177,7 +208,7 @@ def find_RO_occultations(leo_path, gnss_path, et1, et2):
     back, bshape, bframe, observer, abcorr = gnss_id, 'POINT', 'IAU_EARTH', leo_id, 'NONE'
     step, MAXWIN = 30, 50000
     confine = spice.cell_double(2 * MAXWIN)
-    spice.wninsd(et1, et2, confine)
+    spice.wninsd(et1_clamped, et2_clamped, confine)
     result = spice.cell_double(MAXWIN)
     spice.gfoclt(occtype, front, fshape, fframe, back, bshape, bframe, abcorr, observer, step, confine, result)
     target = front
@@ -186,42 +217,53 @@ def find_RO_occultations(leo_path, gnss_path, et1, et2):
     for i in range(num_intervals):
         start, stop = spice.wnfetd(result, i)
         process_occultation(leo_id, gnss_id, start, gnss_name, leo_name,
-                            results_list, fshape, target, fframe, abcorr, locus, observer, rayfrm)
+                            results_list, fshape, target, fframe, abcorr, locus, observer, rayfrm, bbox)
         process_occultation(leo_id, gnss_id, stop, gnss_name, leo_name,
-                            results_list, fshape, target, fframe, abcorr, locus, observer, rayfrm)
+                            results_list, fshape, target, fframe, abcorr, locus, observer, rayfrm, bbox)
     occultations_df = pd.DataFrame(results_list)
     return occultations_df
 
-def run_occultation(leo_folder, gnss_folder, csv_file_path, start_date, end_date):
+def run_occultation(leo_folder, gnss_folder, csv_file_path, start_date, end_date, bbox):
     """
     Runs the occultation analysis over the specified date range using the given folders.
+
+    bbox: (min_lat, max_lat, min_lon, max_lon) in degrees for tangent-point filtering,
+    or None to keep all tangent points with valid coordinates (FOV filter still applies).
     """
-    import spiceypy as spice
-    import pandas as pd
-    from os import path
-    
     dates = pd.date_range(start=start_date, end=end_date, freq='D')
-    
+
     leo_files = get_files_from_folder(leo_folder)
     gnss_files = get_files_from_folder(gnss_folder)
-    
-    if not path.exists(csv_file_path):
+
+    if not os.path.exists(csv_file_path):
         with open(csv_file_path, 'w') as f:
             f.write('')
-    
-    for date in dates:
-        load_time_kernel()
-        et1 = spice.str2et(date.strftime('%Y %m %d 00:00:00 UTC'))
-        et2 = spice.str2et(date.strftime('%Y %m %d 23:59:59 UTC'))
-        for gnss_path in gnss_files:
-            for leo_path in leo_files:
-                try:
-                    print(f"Processing {path.basename(leo_path)} and {path.basename(gnss_path)} for date {date.strftime('%Y-%m-%d')}...")
-                    temp_df = find_RO_occultations(leo_path, gnss_path, et1, et2)
-                    temp_df.to_csv(csv_file_path, mode='a', header=not path.getsize(csv_file_path) > 0, index=False)
-                    spice.kclear()
-                except Exception as e:
-                    print(f"Error processing {gnss_path} on {date.strftime('%Y-%m-%d')}: {e}")
+
+    load_occultation_kernel_pool(leo_files, gnss_files)
+    try:
+        for date in dates:
+            et1 = spice.str2et(date.strftime('%Y %m %d 00:00:00 UTC'))
+            et2 = spice.str2et(date.strftime('%Y %m %d 23:59:59 UTC'))
+            for gnss_path in gnss_files:
+                for leo_path in leo_files:
+                    try:
+                        print(
+                            f"Processing {os.path.basename(leo_path)} and {os.path.basename(gnss_path)} "
+                            f"for date {date.strftime('%Y-%m-%d')}..."
+                        )
+                        temp_df = find_RO_occultations(
+                            leo_path, gnss_path, et1, et2, bbox, load_kernels=False
+                        )
+                        temp_df.to_csv(
+                            csv_file_path,
+                            mode='a',
+                            header=not os.path.getsize(csv_file_path) > 0,
+                            index=False,
+                        )
+                    except Exception as e:
+                        print(f"Error processing {gnss_path} on {date.strftime('%Y-%m-%d')}: {e}")
+    finally:
+        spice.kclear()
                     
 if __name__ == '__main__':
     raise SystemExit("Use main.py with MODE='occultation', or import run_occultation() from Python.")
